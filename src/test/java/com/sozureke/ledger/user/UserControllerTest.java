@@ -1,8 +1,12 @@
 package com.sozureke.ledger.user;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,4 +57,78 @@ public class UserControllerTest {
                 .andExpect(jsonPath("$.passwordHash").doesNotExist());
     }
 
+    @Test
+    void getByIdReturns404WhenUserNotFound() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userService.getById(id)).thenThrow(new UserNotFoundException());
+
+        mockMvc.perform(get("/api/v1/users/{id}", id))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"))
+                .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    void createCustomerReturns400WithoutLeakingPasswordWhenInvalid() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"\",\"password\":\"tiny-pw\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(content().string(not(containsString("tiny-pw"))));
+    }
+
+    @Test
+    void createCustomerReturns400WhenJsonIsMalformed() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{bad json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
+    }
+
+    @Test
+    void getByIdReturns400WhenIdIsNotUuid() throws Exception {
+        mockMvc.perform(get("/api/v1/users/{id}", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ID"));
+    }
+
+    @Test
+    void unexpectedErrorReturns500WithoutInternalDetails() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userService.getById(id)).thenThrow(new IllegalStateException("db password is hunter2"));
+
+        mockMvc.perform(get("/api/v1/users/{id}", id))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.traceId").exists())
+                .andExpect(content().string(not(containsString("hunter2"))));
+    }
+
+    @Test
+    void unknownPathReturns404NotInternalError() throws Exception {
+        mockMvc.perform(get("/api/v1/does-not-exist"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+                .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    void unsupportedMethodReturns405NotInternalError() throws Exception {
+        mockMvc.perform(delete("/api/v1/users/{id}", UUID.randomUUID()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
+                .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    void unsupportedMediaTypeReturns415WithCode() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                .contentType(MediaType.TEXT_PLAIN)
+                .content("name=Ann"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"))
+                .andExpect(jsonPath("$.traceId").exists());
+    }
 }

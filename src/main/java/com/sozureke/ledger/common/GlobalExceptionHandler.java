@@ -7,6 +7,8 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -18,6 +20,7 @@ import jakarta.annotation.Nullable;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
+
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
@@ -46,8 +49,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     protected ResponseEntity<Object> handleExceptionInternal(
             Exception ex, @Nullable Object body, HttpHeaders headers,
             HttpStatusCode statusCode, WebRequest request) {
-        ResponseEntity<Object> response =
-                super.handleExceptionInternal(ex, body, headers, statusCode, request);
+        ResponseEntity<Object> response = super.handleExceptionInternal(ex, body, headers, statusCode, request);
         if (response != null && response.getBody() instanceof ProblemDetail problem) {
             problem.setProperty("code", codeFor(statusCode).name());
             problem.setProperty("traceId", generateTraceId());
@@ -65,6 +67,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = build(ErrorCode.INTERNAL_ERROR);
         log.error("Unhandled exception, traceId={}", problem.getProperties().get("traceId"), ex);
         return problem;
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ProblemDetail handleAuthentication(AuthenticationException ex) {
+        return build(ErrorCode.UNAUTHENTICATED);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ProblemDetail handleAccessDenied(AccessDeniedException ex) {
+        return build(ErrorCode.ACCESS_DENIED);
     }
 
     private ProblemDetail build(ErrorCode code) {

@@ -19,17 +19,26 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.oauth2.server.resource.introspection.OpaqueTokenIntrospector;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import com.sozureke.ledger.auth.AuthWebConfig;
+import com.sozureke.ledger.auth.CurrentUserArgumentResolver;
 import com.sozureke.ledger.common.SecurityConfig;
 import com.sozureke.ledger.common.SecurityProblemHandler;
 
 @WebMvcTest(UserController.class)
-@Import({ SecurityConfig.class, SecurityProblemHandler.class })
+@Import({ SecurityConfig.class, SecurityProblemHandler.class, AuthWebConfig.class, CurrentUserArgumentResolver.class })
 public class UserControllerTest {
+
+    private static final String REGISTER_BODY =
+            "{\"email\":\"ann@example.com\",\"name\":\"Ann\",\"password\":\"secret123\"}";
+
     @Autowired
     MockMvc mockMvc;
     @MockitoBean
@@ -37,44 +46,42 @@ public class UserControllerTest {
     @MockitoBean
     OpaqueTokenIntrospector introspector;
 
+    private static RequestPostProcessor asUser(UUID id) {
+        return opaqueToken().attributes(attributes -> attributes.put("sub", id.toString()));
+    }
+
+    private static User userWithId(UUID id) {
+        User user = User.customer("ann@example.com", "Ann", "hashed");
+        ReflectionTestUtils.setField(user, "id", id);
+        return user;
+    }
+
     @Test
-    void createCustomerReturns201WithLocation() throws Exception {
+    void createCustomerReturns201WithBodyAndNoSecrets() throws Exception {
         when(userService.createCustomer("ann@example.com", "Ann", "secret123"))
                 .thenReturn(User.customer("ann@example.com", "Ann", "hashed"));
 
         mockMvc.perform(post("/api/v1/users")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"ann@example.com\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
+                .content(REGISTER_BODY))
                 .andExpect(status().isCreated())
-                .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.name").value("Ann"))
+                .andExpect(jsonPath("$.email").value("ann@example.com"))
                 .andExpect(jsonPath("$.password").doesNotExist())
-                .andExpect(jsonPath("$.passwordHash").doesNotExist());
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andExpect(content().string(not(containsString("hashed"))));
     }
 
     @Test
-    void getByIdReturns200WithUser() throws Exception {
-        UUID id = UUID.randomUUID();
-        User user = User.customer("ann@example.com", "Ann", "hashed");
-        ReflectionTestUtils.setField(user, "id", id);
-        when(userService.getById(id)).thenReturn(user);
+    void createCustomerReturns409WhenEmailAlreadyRegistered() throws Exception {
+        when(userService.createCustomer("ann@example.com", "Ann", "secret123"))
+                .thenThrow(new EmailAlreadyRegisteredException());
 
-        mockMvc.perform(get("/api/v1/users/{id}", id).with(opaqueToken()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()))
-                .andExpect(jsonPath("$.name").value("Ann"))
-                .andExpect(jsonPath("$.passwordHash").doesNotExist());
-    }
-
-    @Test
-    void getByIdReturns404WhenUserNotFound() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(userService.getById(id)).thenThrow(new UserNotFoundException());
-
-        mockMvc.perform(get("/api/v1/users/{id}", id).with(opaqueToken()))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"))
-                .andExpect(jsonPath("$.traceId").exists());
+        mockMvc.perform(post("/api/v1/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(REGISTER_BODY))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("EMAIL_ALREADY_REGISTERED"));
     }
 
     @Test
@@ -88,47 +95,21 @@ public class UserControllerTest {
     }
 
     @Test
+    void createCustomerReturns400WhenEmailIsNotAnEmail() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"not-an-email\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
     void createCustomerReturns400WhenJsonIsMalformed() throws Exception {
         mockMvc.perform(post("/api/v1/users")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{bad json"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
-    }
-
-    @Test
-    void getByIdReturns400WhenIdIsNotUuid() throws Exception {
-        mockMvc.perform(get("/api/v1/users/{id}", "not-a-uuid").with(opaqueToken()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("INVALID_ID"));
-    }
-
-    @Test
-    void unexpectedErrorReturns500WithoutInternalDetails() throws Exception {
-        UUID id = UUID.randomUUID();
-        when(userService.getById(id)).thenThrow(new IllegalStateException("db password is hunter2"));
-
-        mockMvc.perform(get("/api/v1/users/{id}", id).with(opaqueToken()))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
-                .andExpect(jsonPath("$.traceId").exists())
-                .andExpect(content().string(not(containsString("hunter2"))));
-    }
-
-    @Test
-    void unknownPathReturns404NotInternalError() throws Exception {
-        mockMvc.perform(get("/api/v1/does-not-exist").with(opaqueToken()))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
-                .andExpect(jsonPath("$.traceId").exists());
-    }
-
-    @Test
-    void unsupportedMethodReturns405NotInternalError() throws Exception {
-        mockMvc.perform(delete("/api/v1/users/{id}", UUID.randomUUID()).with(opaqueToken()))
-                .andExpect(status().isMethodNotAllowed())
-                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
-                .andExpect(jsonPath("$.traceId").exists());
     }
 
     @Test
@@ -142,32 +123,90 @@ public class UserControllerTest {
     }
 
     @Test
-    void createCustomerReturns409WhenEmailAlreadyRegistered() throws Exception {
-        when(userService.createCustomer("ann@example.com", "Ann", "secret123"))
-                .thenThrow(new EmailAlreadyRegisteredException());
+    void meReturnsTheProfileOfTheTokenOwner() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userService.getById(id)).thenReturn(userWithId(id));
 
-        mockMvc.perform(post("/api/v1/users")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"ann@example.com\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("EMAIL_ALREADY_REGISTERED"));
+        mockMvc.perform(get("/api/v1/users/me").with(asUser(id)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id.toString()))
+                .andExpect(jsonPath("$.email").value("ann@example.com"))
+                .andExpect(jsonPath("$.name").value("Ann"))
+                .andExpect(jsonPath("$.passwordHash").doesNotExist());
     }
 
     @Test
-    void createCustomerReturns400WhenEmailIsNotAnEmail() throws Exception {
-        mockMvc.perform(post("/api/v1/users")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"not-an-email\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
-    }
-
-    @Test
-    void getByIdReturns401WithoutToken() throws Exception {
-        mockMvc.perform(get("/api/v1/users/{id}", UUID.randomUUID()))
+    void meReturns401WithoutToken() throws Exception {
+        mockMvc.perform(get("/api/v1/users/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string("WWW-Authenticate", "Bearer"))
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    void meReturns404WhenTheTokenOwnerNoLongerExists() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userService.getById(id)).thenThrow(new UserNotFoundException());
+
+        mockMvc.perform(get("/api/v1/users/me").with(asUser(id)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"))
+                .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    void securityExceptionFromControllerBecomes401NotInternalError() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userService.getById(id)).thenThrow(new AuthenticationCredentialsNotFoundException("no auth"));
+
+        mockMvc.perform(get("/api/v1/users/me").with(asUser(id)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void accessDeniedFromControllerBecomes403NotInternalError() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userService.getById(id)).thenThrow(new AccessDeniedException("denied"));
+
+        mockMvc.perform(get("/api/v1/users/me").with(asUser(id)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void unexpectedErrorReturns500WithoutInternalDetails() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userService.getById(id)).thenThrow(new IllegalStateException("db password is hunter2"));
+
+        mockMvc.perform(get("/api/v1/users/me").with(asUser(id)))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.traceId").exists())
+                .andExpect(content().string(not(containsString("hunter2"))));
+    }
+
+    @Test
+    void listingOrReadingUsersByIdIsNotExposed() throws Exception {
+        mockMvc.perform(get("/api/v1/users/{id}", UUID.randomUUID()).with(asUser(UUID.randomUUID())))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    @Test
+    void unknownPathReturns404WithCode() throws Exception {
+        mockMvc.perform(get("/api/v1/does-not-exist").with(asUser(UUID.randomUUID())))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+                .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    void unsupportedMethodReturns405WithCode() throws Exception {
+        mockMvc.perform(delete("/api/v1/users/me").with(asUser(UUID.randomUUID())))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
                 .andExpect(jsonPath("$.traceId").exists());
     }
 }

@@ -34,6 +34,9 @@ public class User {
     @Column(nullable = false, length = 100)
     private String name;
 
+    @Column(length = 255)
+    private String email;
+
     @Column(name = "password_hash")
     private String passwordHash;
 
@@ -45,17 +48,18 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    private User(UserKind kind, String name, String passwordHash) {
+    private User(UserKind kind, String email, String name, String passwordHash) {
         this.kind = kind;
+        this.email = email;
         this.name = name;
         this.passwordHash = passwordHash;
     }
 
-    public static User customer(String name, String passwordHash) {
-        return new User(UserKind.CUSTOMER, name, passwordHash);
+    public static User customer(String email, String name, String passwordHash) {
+        return new User(UserKind.CUSTOMER, email, name, passwordHash);
     }
 
     public static User system(String name) {
-        return new User(UserKind.SYSTEM, name, null);
+        return new User(UserKind.SYSTEM, null, name, null);
     }
 }

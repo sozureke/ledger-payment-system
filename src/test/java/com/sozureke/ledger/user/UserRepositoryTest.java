@@ -33,7 +33,7 @@ class UserRepositoryTest {
 
     @Test
     void savesCustomerAndReadsItBack() {
-        User user = User.customer("Ann", "hash");
+        User user = User.customer("ann@example.com", "Ann", "hash");
 
         userRepository.saveAndFlush(user);
         entityManager.clear();
@@ -42,6 +42,7 @@ class UserRepositoryTest {
         assertThat(found.getId()).isEqualTo(user.getId());
         assertThat(found.getKind()).isEqualTo(UserKind.CUSTOMER);
         assertThat(found.getName()).isEqualTo("Ann");
+        assertThat(found.getEmail()).isEqualTo("ann@example.com");
         assertThat(found.getPasswordHash()).isEqualTo("hash");
         assertThat(found.getCreatedAt()).isNotNull();
         assertThat(found.getUpdatedAt()).isNotNull();
@@ -50,7 +51,7 @@ class UserRepositoryTest {
     @Test
     void rejectsCustomerWithoutPasswordHash() {
         assertThatThrownBy(() -> jdbcTemplate.update(
-                "INSERT INTO users (kind, name) VALUES ('CUSTOMER', 'Ann')"))
+                "INSERT INTO users (kind, name, email) VALUES ('CUSTOMER', 'Ann', 'ann@example.com')"))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("users_password_chk");
     }
@@ -66,14 +67,14 @@ class UserRepositoryTest {
     @Test
     void rejectsUnknownKind() {
         assertThatThrownBy(() -> jdbcTemplate.update(
-                "INSERT INTO users (kind, name, password_hash) VALUES ('ADMIN', 'Ann', 'hash')"))
+                "INSERT INTO users (kind, name, email, password_hash) VALUES ('ADMIN', 'Ann', 'ann@example.com', 'hash')"))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("users_kind_chk");
     }
 
     @Test
     void findsCustomerByIdAndKind() {
-        User customer = User.customer("Ann", "hash");
+        User customer = User.customer("ann@example.com", "Ann", "hash");
         userRepository.saveAndFlush(customer);
         entityManager.clear();
 
@@ -84,7 +85,7 @@ class UserRepositoryTest {
 
     @Test
     void doesNotFindSystemUserAsCustomer() {
-        User customer = User.customer("Ann", "hash");
+        User customer = User.customer("ann@example.com", "Ann", "hash");
         User system = User.system("bank");
         userRepository.saveAndFlush(customer);
         userRepository.saveAndFlush(system);
@@ -93,5 +94,46 @@ class UserRepositoryTest {
         Optional<User> result = userRepository.findByIdAndKind(system.getId(), UserKind.CUSTOMER);
         assertThat(result).isEmpty();
 
+    }
+
+    @Test
+    void rejectsCustomerWithoutEmail() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO users (kind, name, password_hash) VALUES ('CUSTOMER', 'Ann', 'hash')"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("users_email_chk");
+    }
+
+    @Test
+    void rejectsSystemUserWithEmail() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO users (kind, name, email) VALUES ('SYSTEM', 'bank', 'bank@example.com')"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("users_email_chk");
+    }
+
+    @Test
+    void rejectsEmailThatIsNotLowerCase() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO users (kind, name, email, password_hash) VALUES ('CUSTOMER', 'Ann', 'Ann@Example.com', 'hash')"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("users_email_lower_chk");
+    }
+
+    @Test
+    void rejectsDuplicateEmail() {
+        userRepository.saveAndFlush(User.customer("ann@example.com", "Ann", "hash"));
+
+        assertThatThrownBy(() -> userRepository.saveAndFlush(User.customer("ann@example.com", "Other", "hash")))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("users_email_uk");
+    }
+
+    @Test
+    void existsByEmailIsTrueOnlyForRegisteredEmail() {
+        userRepository.saveAndFlush(User.customer("ann@example.com", "Ann", "hash"));
+
+        assertThat(userRepository.existsByEmail("ann@example.com")).isTrue();
+        assertThat(userRepository.existsByEmail("bob@example.com")).isFalse();
     }
 }

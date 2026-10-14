@@ -131,7 +131,7 @@ class AccountRepositoryTest {
 
     private UUID insertCustomer(String name) {
         return jdbcTemplate.queryForObject(
-                "INSERT INTO users (kind, name, password_hash) VALUES ('CUSTOMER', ?, 'hash') RETURNING id",
-                UUID.class, name);
+                "INSERT INTO users (kind, name, email, password_hash) VALUES ('CUSTOMER', ?, ?, 'hash') RETURNING id",
+                UUID.class, name, name.toLowerCase() + "@example.com");
     }
 }

@@ -26,7 +26,7 @@ public class UserController {
 
     @PostMapping
     public ResponseEntity<UserResponse> createCustomer(@Valid @RequestBody CreateUserRequest request) {
-        User user = userService.createCustomer(request.name(), request.password());
+        User user = userService.createCustomer(request.email(), request.name(), request.password());
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}")
                 .buildAndExpand(user.getId())

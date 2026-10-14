@@ -18,7 +18,8 @@ public enum ErrorCode {
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type"),
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "Account not found"),
     ACCOUNT_ALREADY_EXISTS(HttpStatus.CONFLICT, "Account already exists"),
-    UNSUPPORTED_CURRENCY(HttpStatus.BAD_REQUEST, "Unsupported currency");
+    UNSUPPORTED_CURRENCY(HttpStatus.BAD_REQUEST, "Unsupported currency"),
+    EMAIL_ALREADY_REGISTERED(HttpStatus.CONFLICT, "Email already registered");
 
     private final HttpStatus status;
     private final String title;

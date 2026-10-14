@@ -30,12 +30,12 @@ public class UserControllerTest {
 
     @Test
     void createCustomerReturns201WithLocation() throws Exception {
-        when(userService.createCustomer("Ann", "secret123"))
-                .thenReturn(User.customer("Ann", "hashed"));
+        when(userService.createCustomer("ann@example.com", "Ann", "secret123"))
+                .thenReturn(User.customer("ann@example.com", "Ann", "hashed"));
 
         mockMvc.perform(post("/api/v1/users")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"Ann\",\"password\":\"secret123\"}"))
+                .content("{\"email\":\"ann@example.com\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(header().exists("Location"))
                 .andExpect(jsonPath("$.name").value("Ann"))
@@ -46,7 +46,7 @@ public class UserControllerTest {
     @Test
     void getByIdReturns200WithUser() throws Exception {
         UUID id = UUID.randomUUID();
-        User user = User.customer("Ann", "hashed");
+        User user = User.customer("ann@example.com", "Ann", "hashed");
         ReflectionTestUtils.setField(user, "id", id);
         when(userService.getById(id)).thenReturn(user);
 
@@ -72,7 +72,7 @@ public class UserControllerTest {
     void createCustomerReturns400WithoutLeakingPasswordWhenInvalid() throws Exception {
         mockMvc.perform(post("/api/v1/users")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"\",\"password\":\"tiny-pw\"}"))
+                .content("{\"email\":\"ann@example.com\",\"name\":\"\",\"password\":\"tiny-pw\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(content().string(not(containsString("tiny-pw"))));
@@ -130,5 +130,26 @@ public class UserControllerTest {
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"))
                 .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    void createCustomerReturns409WhenEmailAlreadyRegistered() throws Exception {
+        when(userService.createCustomer("ann@example.com", "Ann", "secret123"))
+                .thenThrow(new EmailAlreadyRegisteredException());
+
+        mockMvc.perform(post("/api/v1/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"ann@example.com\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("EMAIL_ALREADY_REGISTERED"));
+    }
+
+    @Test
+    void createCustomerReturns400WhenEmailIsNotAnEmail() throws Exception {
+        mockMvc.perform(post("/api/v1/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"not-an-email\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
     }
 }

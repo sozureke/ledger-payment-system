@@ -1,6 +1,8 @@
-package com.sozureke.ledger;
+package com.sozureke.ledger.support;
 
 import org.springframework.boot.SpringApplication;
+
+import com.sozureke.ledger.LedgerApplication;
 
 public class TestLedgerApplication {
 

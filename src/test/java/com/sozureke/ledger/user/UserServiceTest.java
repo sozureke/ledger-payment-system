@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -62,7 +61,7 @@ public class UserServiceTest {
                 .isInstanceOf(EmailAlreadyRegisteredException.class);
 
         verify(userRepository, never()).saveAndFlush(any(User.class));
-        verifyNoInteractions(passwordEncoder);
+        verify(passwordEncoder, never()).encode("secret");
     }
 
     @Test
@@ -96,4 +95,33 @@ public class UserServiceTest {
         assertThat(result).isSameAs(user);
     }
 
+    @Test
+    void authenticateReturnsUserWhenPasswordMatches() {
+        User user = User.customer("ann@example.com", "Ann", "stored-hash");
+        when(userRepository.findByEmailAndKind("ann@example.com", UserKind.CUSTOMER)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("secret", "stored-hash")).thenReturn(true);
+
+        Optional<User> result = userService.authenticate("Ann@Example.com", "secret");
+
+        assertThat(result).containsSame(user);
+    }
+
+    @Test
+    void authenticateReturnsEmptyWhenPasswordDoesNotMatch() {
+        User user = User.customer("ann@example.com", "Ann", "stored-hash");
+        when(userRepository.findByEmailAndKind("ann@example.com", UserKind.CUSTOMER)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("wrong", "stored-hash")).thenReturn(false);
+
+        assertThat(userService.authenticate("ann@example.com", "wrong")).isEmpty();
+    }
+
+    @Test
+    void authenticateStillComparesPasswordWhenEmailIsUnknown() {
+        when(userRepository.findByEmailAndKind("ghost@example.com", UserKind.CUSTOMER)).thenReturn(Optional.empty());
+        when(passwordEncoder.matches(any(), any())).thenReturn(false);
+
+        assertThat(userService.authenticate("ghost@example.com", "secret")).isEmpty();
+
+        verify(passwordEncoder).matches(any(), any());
+    }
 }

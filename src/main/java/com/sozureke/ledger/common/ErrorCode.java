@@ -19,7 +19,10 @@ public enum ErrorCode {
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "Account not found"),
     ACCOUNT_ALREADY_EXISTS(HttpStatus.CONFLICT, "Account already exists"),
     UNSUPPORTED_CURRENCY(HttpStatus.BAD_REQUEST, "Unsupported currency"),
-    EMAIL_ALREADY_REGISTERED(HttpStatus.CONFLICT, "Email already registered");
+    EMAIL_ALREADY_REGISTERED(HttpStatus.CONFLICT, "Email already registered"),
+    UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "Authentication required"),
+    INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "Invalid credentials"),
+    ACCESS_DENIED(HttpStatus.FORBIDDEN, "Access denied");
 
     private final HttpStatus status;
     private final String title;

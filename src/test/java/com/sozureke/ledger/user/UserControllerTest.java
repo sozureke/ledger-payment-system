@@ -3,6 +3,7 @@ package com.sozureke.ledger.user;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.opaqueToken;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -16,17 +17,25 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.server.resource.introspection.OpaqueTokenIntrospector;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.sozureke.ledger.common.SecurityConfig;
+import com.sozureke.ledger.common.SecurityProblemHandler;
+
 @WebMvcTest(UserController.class)
+@Import({ SecurityConfig.class, SecurityProblemHandler.class })
 public class UserControllerTest {
     @Autowired
     MockMvc mockMvc;
     @MockitoBean
     UserService userService;
+    @MockitoBean
+    OpaqueTokenIntrospector introspector;
 
     @Test
     void createCustomerReturns201WithLocation() throws Exception {
@@ -50,7 +59,7 @@ public class UserControllerTest {
         ReflectionTestUtils.setField(user, "id", id);
         when(userService.getById(id)).thenReturn(user);
 
-        mockMvc.perform(get("/api/v1/users/{id}", id))
+        mockMvc.perform(get("/api/v1/users/{id}", id).with(opaqueToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id.toString()))
                 .andExpect(jsonPath("$.name").value("Ann"))
@@ -62,7 +71,7 @@ public class UserControllerTest {
         UUID id = UUID.randomUUID();
         when(userService.getById(id)).thenThrow(new UserNotFoundException());
 
-        mockMvc.perform(get("/api/v1/users/{id}", id))
+        mockMvc.perform(get("/api/v1/users/{id}", id).with(opaqueToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"))
                 .andExpect(jsonPath("$.traceId").exists());
@@ -89,7 +98,7 @@ public class UserControllerTest {
 
     @Test
     void getByIdReturns400WhenIdIsNotUuid() throws Exception {
-        mockMvc.perform(get("/api/v1/users/{id}", "not-a-uuid"))
+        mockMvc.perform(get("/api/v1/users/{id}", "not-a-uuid").with(opaqueToken()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_ID"));
     }
@@ -99,7 +108,7 @@ public class UserControllerTest {
         UUID id = UUID.randomUUID();
         when(userService.getById(id)).thenThrow(new IllegalStateException("db password is hunter2"));
 
-        mockMvc.perform(get("/api/v1/users/{id}", id))
+        mockMvc.perform(get("/api/v1/users/{id}", id).with(opaqueToken()))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
                 .andExpect(jsonPath("$.traceId").exists())
@@ -108,7 +117,7 @@ public class UserControllerTest {
 
     @Test
     void unknownPathReturns404NotInternalError() throws Exception {
-        mockMvc.perform(get("/api/v1/does-not-exist"))
+        mockMvc.perform(get("/api/v1/does-not-exist").with(opaqueToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
                 .andExpect(jsonPath("$.traceId").exists());
@@ -116,7 +125,7 @@ public class UserControllerTest {
 
     @Test
     void unsupportedMethodReturns405NotInternalError() throws Exception {
-        mockMvc.perform(delete("/api/v1/users/{id}", UUID.randomUUID()))
+        mockMvc.perform(delete("/api/v1/users/{id}", UUID.randomUUID()).with(opaqueToken()))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
                 .andExpect(jsonPath("$.traceId").exists());
@@ -151,5 +160,14 @@ public class UserControllerTest {
                 .content("{\"email\":\"not-an-email\",\"name\":\"Ann\",\"password\":\"secret123\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void getByIdReturns401WithoutToken() throws Exception {
+        mockMvc.perform(get("/api/v1/users/{id}", UUID.randomUUID()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("WWW-Authenticate", "Bearer"))
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.traceId").exists());
     }
 }
